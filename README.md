@@ -42,7 +42,7 @@ The Go application provides these HTTP endpoints:
 
 ### Prerequisites
 
-- Go 1.25+
+- Go 1.24+
 - Docker and Docker Compose
 - Make (optional, for using Makefile targets)
 
