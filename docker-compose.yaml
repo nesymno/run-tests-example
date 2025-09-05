@@ -2,7 +2,7 @@ version: '3.8'
 
 networks:
   test:
-    driver: host
+    driver: bridge
 
 services:
   app:
