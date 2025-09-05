@@ -18,12 +18,15 @@ RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 # Final stage
 FROM public.ecr.aws/docker/library/alpine:latest
 
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates make
 
 WORKDIR /root/
 
 # Copy the binary from builder stage
 COPY --from=builder /app/main .
+
+# Copy source code for testing
+COPY --from=builder /app/ .
 
 # Expose port
 EXPOSE 8080

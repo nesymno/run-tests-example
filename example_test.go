@@ -59,16 +59,115 @@ func TestApp(t *testing.T) {
 	}
 
 	t.Run("PostgreSQL Tests", func(t *testing.T) {
+		t.Log("=== STARTING POSTGRESQL TEST ===")
+		t.Log("About to call cleanupTestData...")
+		defer func() {
+			if r := recover(); r != nil {
+				t.Logf("Cleanup function panicked: %v", r)
+			}
+		}()
+		cleanupTestData(t, ctx, postgresConfig, redisConfig)
+		t.Log("=== CLEANUP COMPLETED, STARTING TEST ===")
 		testPGWithConfig(t, ctx, postgresConfig)
 	})
 
 	t.Run("Redis Tests", func(t *testing.T) {
+		t.Log("=== STARTING REDIS TEST ===")
+		cleanupTestData(t, ctx, postgresConfig, redisConfig)
+		t.Log("=== CLEANUP COMPLETED, STARTING TEST ===")
 		testRedisWithConfig(t, ctx, redisConfig)
 	})
 
 	t.Run("Application Integration Tests", func(t *testing.T) {
 		testAppIntegration(t, ctx, fmt.Sprintf("http://%s:%s", appHost, appPort))
 	})
+}
+
+// cleanupTestData cleans up any existing test data from previous runs
+func cleanupTestData(t *testing.T, ctx context.Context, postgresConfig PostgresConfig, redisConfig RedisConfig) {
+	t.Log("=== CLEANUP FUNCTION CALLED ===")
+	t.Log("Starting test data cleanup...")
+	
+	// Simple test to see if we can log
+	t.Log("Cleanup function is executing...")
+
+	// Clean up PostgreSQL
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		postgresConfig.Host, postgresConfig.Port, postgresConfig.User, postgresConfig.Pass, postgresConfig.DB)
+
+	t.Logf("Connecting to PostgreSQL at %s:%s", postgresConfig.Host, postgresConfig.Port)
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Logf("Error: Could not open PostgreSQL connection: %v", err)
+		return
+	}
+	defer db.Close()
+	
+	// Test connection with retry
+	var pingErr error
+	for i := 0; i < 5; i++ {
+		pingErr = db.Ping()
+		if pingErr == nil {
+			break
+		}
+		t.Logf("PostgreSQL ping attempt %d failed: %v", i+1, pingErr)
+		time.Sleep(time.Second)
+	}
+	
+	if pingErr != nil {
+		t.Logf("Error: Could not ping PostgreSQL after 5 attempts: %v", pingErr)
+		return
+	}
+	
+	t.Log("PostgreSQL connection successful")
+	
+	// Clear test data table
+	result, err := db.ExecContext(ctx, "DELETE FROM test_data")
+	if err != nil {
+		t.Logf("Error: Could not clear PostgreSQL test data: %v", err)
+	} else {
+		rowsAffected, _ := result.RowsAffected()
+		t.Logf("Cleared %d rows from PostgreSQL test_data table", rowsAffected)
+	}
+
+	// Clean up Redis
+	t.Logf("Connecting to Redis at %s:%s", redisConfig.Host, redisConfig.Port)
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%s", redisConfig.Host, redisConfig.Port),
+		Password: "",
+		DB:       redisConfig.DB,
+	})
+	defer rdb.Close()
+
+	// Test Redis connection with retry
+	var redisPingErr error
+	for i := 0; i < 5; i++ {
+		redisPingErr = rdb.Ping(ctx).Err()
+		if redisPingErr == nil {
+			break
+		}
+		t.Logf("Redis ping attempt %d failed: %v", i+1, redisPingErr)
+		time.Sleep(time.Second)
+	}
+	
+	if redisPingErr != nil {
+		t.Logf("Error: Could not ping Redis after 5 attempts: %v", redisPingErr)
+		return
+	}
+	
+	t.Log("Redis connection successful")
+	
+	// Clear all test keys
+	keys := []string{"key1", "key2", "key3", "test_list", "test_hash", "test_data_cache", "test_key"}
+	clearedCount := 0
+	for _, key := range keys {
+		if rdb.Del(ctx, key).Val() > 0 {
+			clearedCount++
+		}
+	}
+	t.Logf("Cleared %d keys from Redis", clearedCount)
+
+	t.Log("Test data cleanup completed")
 }
 
 // testPGWithConfig tests PostgreSQL functionality using PostgresConfig

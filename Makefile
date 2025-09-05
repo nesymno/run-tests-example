@@ -52,7 +52,7 @@ test-integration:
 	export POSTGRES_DB=testdb && \
 	export REDIS_HOST=localhost && \
 	export REDIS_PORT=6379 && \
-	go test -v -run TestApp ./...
+	go test -v -run TestAppIntegration ./...
 
 # Full test pipeline: build Docker image, run tests
 test-pipeline: docker-build docker-test
