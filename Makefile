@@ -43,7 +43,7 @@ docker-test:
 
 # Test application integration (requires running services)
 test-integration:
-	export APP_HOST=localhost && \
+	export APP_HOST=app && \
 	export APP_PORT=8080 && \
 	export POSTGRES_HOST=localhost && \
 	export POSTGRES_PORT=5432 && \
@@ -52,7 +52,7 @@ test-integration:
 	export POSTGRES_DB=testdb && \
 	export REDIS_HOST=localhost && \
 	export REDIS_PORT=6379 && \
-	go test -v -run TestAppIntegration ./...
+	go test -v -run TestApp ./...
 
 # Full test pipeline: build Docker image, run tests
 test-pipeline: docker-build docker-test
