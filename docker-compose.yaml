@@ -1,22 +1,39 @@
 version: '3.8'
 
-networks:
-  test:
-    driver: bridge
-
 services:
+  app:
+    build: .
+    ports:
+      - "8080"
+    environment:
+      - PORT=8080
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=testdb
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
   postgres:
-    image: postgres:15-alpine
+    image: public.ecr.aws/docker/library/postgres:15-alpine
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: testdb
     ports:
       - "5432"
-    networks:
-      test:
-        aliases:
-          - postgres
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -26,13 +43,9 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: public.ecr.aws/docker/library/redis:7-alpine
     ports:
       - "6379"
-    networks:
-      test:
-        aliases:
-          - redis
     command: redis-server --appendonly yes
     volumes:
       - redis_data:/data
@@ -41,6 +54,43 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+
+  # testcontainer:
+  #   build:
+  #     context: .
+  #     dockerfile_inline: |
+  #       FROM public.ecr.aws/docker/library/golang:1.24-alpine
+  #       WORKDIR /workspace
+  #       COPY . .
+  #       RUN apk add --no-cache make
+  #       RUN go mod download
+  #   working_dir: /workspace
+  #   networks:
+  #     test:
+  #       aliases:
+  #         - testcontainer
+  #   environment:
+  #     - APP_HOST=app
+  #     - APP_PORT=8080
+  #     - POSTGRES_HOST=postgres
+  #     - POSTGRES_PORT=5432
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=postgres
+  #     - POSTGRES_DB=testdb
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #   depends_on:
+  #     app:
+  #       condition: service_healthy
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #   command: >
+  #     sh -c "
+  #       echo 'Running tests...' &&
+  #       go test -v -run TestApp ./...
+  #     "
 
 volumes:
   postgres_data:

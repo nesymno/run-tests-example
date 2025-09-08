@@ -1,24 +1,22 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"testing"
+	"time"
 
 	_ "github.com/lib/pq"
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// TestData represents test data structure used in examples
-type TestData struct {
-	ID   int    `json:"id"`
-	Name string `json:"name"`
-	Data string `json:"data"`
-}
 
 type PostgresConfig struct {
 	Host string
@@ -51,13 +49,125 @@ func TestApp(t *testing.T) {
 		DB:   0,
 	}
 
+	appHost := os.Getenv("APP_HOST")
+	if appHost == "" {
+		appHost = "localhost"
+	}
+	appPort := os.Getenv("APP_PORT")
+	if appPort == "" {
+		appPort = "8080"
+	}
+
 	t.Run("PostgreSQL Tests", func(t *testing.T) {
+		t.Log("=== STARTING POSTGRESQL TEST ===")
+		t.Log("About to call cleanupTestData...")
+		defer func() {
+			if r := recover(); r != nil {
+				t.Logf("Cleanup function panicked: %v", r)
+			}
+		}()
+		cleanupTestData(t, ctx, postgresConfig, redisConfig)
+		t.Log("=== CLEANUP COMPLETED, STARTING TEST ===")
 		testPGWithConfig(t, ctx, postgresConfig)
 	})
 
 	t.Run("Redis Tests", func(t *testing.T) {
+		t.Log("=== STARTING REDIS TEST ===")
+		cleanupTestData(t, ctx, postgresConfig, redisConfig)
+		t.Log("=== CLEANUP COMPLETED, STARTING TEST ===")
 		testRedisWithConfig(t, ctx, redisConfig)
 	})
+
+	t.Run("Application Integration Tests", func(t *testing.T) {
+		testAppIntegration(t, ctx, fmt.Sprintf("http://%s:%s", appHost, appPort))
+	})
+}
+
+// cleanupTestData cleans up any existing test data from previous runs
+func cleanupTestData(t *testing.T, ctx context.Context, postgresConfig PostgresConfig, redisConfig RedisConfig) {
+	t.Log("=== CLEANUP FUNCTION CALLED ===")
+	t.Log("Starting test data cleanup...")
+	
+	// Simple test to see if we can log
+	t.Log("Cleanup function is executing...")
+
+	// Clean up PostgreSQL
+	dsn := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
+		postgresConfig.Host, postgresConfig.Port, postgresConfig.User, postgresConfig.Pass, postgresConfig.DB)
+
+	t.Logf("Connecting to PostgreSQL at %s:%s", postgresConfig.Host, postgresConfig.Port)
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		t.Logf("Error: Could not open PostgreSQL connection: %v", err)
+		return
+	}
+	defer db.Close()
+	
+	// Test connection with retry
+	var pingErr error
+	for i := 0; i < 5; i++ {
+		pingErr = db.Ping()
+		if pingErr == nil {
+			break
+		}
+		t.Logf("PostgreSQL ping attempt %d failed: %v", i+1, pingErr)
+		time.Sleep(time.Second)
+	}
+	
+	if pingErr != nil {
+		t.Logf("Error: Could not ping PostgreSQL after 5 attempts: %v", pingErr)
+		return
+	}
+	
+	t.Log("PostgreSQL connection successful")
+	
+	// Clear test data table
+	result, err := db.ExecContext(ctx, "DELETE FROM test_data")
+	if err != nil {
+		t.Logf("Error: Could not clear PostgreSQL test data: %v", err)
+	} else {
+		rowsAffected, _ := result.RowsAffected()
+		t.Logf("Cleared %d rows from PostgreSQL test_data table", rowsAffected)
+	}
+
+	// Clean up Redis
+	t.Logf("Connecting to Redis at %s:%s", redisConfig.Host, redisConfig.Port)
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     fmt.Sprintf("%s:%s", redisConfig.Host, redisConfig.Port),
+		Password: "",
+		DB:       redisConfig.DB,
+	})
+	defer rdb.Close()
+
+	// Test Redis connection with retry
+	var redisPingErr error
+	for i := 0; i < 5; i++ {
+		redisPingErr = rdb.Ping(ctx).Err()
+		if redisPingErr == nil {
+			break
+		}
+		t.Logf("Redis ping attempt %d failed: %v", i+1, redisPingErr)
+		time.Sleep(time.Second)
+	}
+	
+	if redisPingErr != nil {
+		t.Logf("Error: Could not ping Redis after 5 attempts: %v", redisPingErr)
+		return
+	}
+	
+	t.Log("Redis connection successful")
+	
+	// Clear all test keys
+	keys := []string{"key1", "key2", "key3", "test_list", "test_hash", "test_data_cache", "test_key"}
+	clearedCount := 0
+	for _, key := range keys {
+		if rdb.Del(ctx, key).Val() > 0 {
+			clearedCount++
+		}
+	}
+	t.Logf("Cleared %d keys from Redis", clearedCount)
+
+	t.Log("Test data cleanup completed")
 }
 
 // testPGWithConfig tests PostgreSQL functionality using PostgresConfig
@@ -173,4 +283,113 @@ func testRedisWithConfig(t *testing.T, ctx context.Context, config RedisConfig) 
 	assert.Equal(t, "value1", hashValue)
 
 	t.Logf("redis test completed successfully")
+}
+
+// testAppIntegration tests the application's HTTP endpoints and integration
+func testAppIntegration(t *testing.T, ctx context.Context, baseURL string) {
+	client := &http.Client{Timeout: 10 * time.Second}
+
+	t.Run("Health Check", func(t *testing.T) {
+		resp, err := client.Get(baseURL + "/health")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var health HealthResponse
+		err = json.NewDecoder(resp.Body).Decode(&health)
+		require.NoError(t, err)
+
+		assert.Equal(t, "healthy", health.Status)
+		assert.Equal(t, "healthy", health.Database)
+		assert.Equal(t, "healthy", health.Cache)
+		assert.Equal(t, "1.0.0", health.Version)
+
+		t.Logf("health check passed - database: %s, cache: %s", health.Database, health.Cache)
+	})
+
+	t.Run("Root Endpoint", func(t *testing.T) {
+		resp, err := client.Get(baseURL + "/")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		body, err := io.ReadAll(resp.Body)
+		require.NoError(t, err)
+		assert.Contains(t, string(body), "KubeRLy Test App")
+	})
+
+	t.Run("Test Data Endpoint", func(t *testing.T) {
+		resp, err := client.Get(baseURL + "/api/test")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var data []TestData
+		err = json.NewDecoder(resp.Body).Decode(&data)
+		require.NoError(t, err)
+		assert.NotEmpty(t, data, "should return test data")
+	})
+
+	t.Run("Data CRUD Operations", func(t *testing.T) {
+		// Test POST - Create new data
+		newData := TestData{Name: "integration_test", Data: "test_data"}
+		jsonData, err := json.Marshal(newData)
+		require.NoError(t, err)
+
+		resp, err := client.Post(baseURL+"/api/data", "application/json", bytes.NewBuffer(jsonData))
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+		// Test GET - Retrieve data (should show cache miss first time)
+		resp, err = client.Get(baseURL + "/api/data")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "MISS", resp.Header.Get("X-Cache"))
+
+		// Test GET again - should show cache hit
+		resp, err = client.Get(baseURL + "/api/data")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+		assert.Equal(t, "HIT", resp.Header.Get("X-Cache"))
+	})
+
+	t.Run("Cache Operations", func(t *testing.T) {
+		// Test POST - Set cache value
+		cacheData := map[string]interface{}{
+			"key":   "test_key",
+			"value": "test_value",
+			"ttl":   60,
+		}
+		jsonData, err := json.Marshal(cacheData)
+		require.NoError(t, err)
+
+		resp, err := client.Post(baseURL+"/api/cache", "application/json", bytes.NewBuffer(jsonData))
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusCreated, resp.StatusCode)
+
+		// Test GET - Retrieve cache value
+		resp, err = client.Get(baseURL + "/api/cache?key=test_key")
+		require.NoError(t, err)
+		defer resp.Body.Close()
+
+		assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+		var result map[string]string
+		err = json.NewDecoder(resp.Body).Decode(&result)
+		require.NoError(t, err)
+		assert.Equal(t, "test_key", result["key"])
+		assert.Equal(t, "test_value", result["value"])
+	})
+
+	t.Logf("application integration tests completed successfully")
 }
