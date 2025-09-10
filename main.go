@@ -25,7 +25,7 @@ type HealthResponse struct {
 type TestData struct {
 	ID   int    `json:"id"`
 	Name string `json:"name"`
-	Data string    `json:"data"`
+	Data string `json:"data"`
 }
 
 type App struct {
@@ -49,7 +49,6 @@ func main() {
 
 	// Setup HTTP handlers
 	http.HandleFunc("/health", app.healthHandler)
-	http.HandleFunc("/api/test", app.testDataHandler)
 	http.HandleFunc("/api/data", app.dataHandler)
 	http.HandleFunc("/api/cache", app.cacheHandler)
 	http.HandleFunc("/", app.rootHandler)
@@ -164,36 +163,6 @@ func (app *App) healthHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(response)
 }
 
-func (app *App) testDataHandler(w http.ResponseWriter, r *http.Request) {
-	ctx := context.Background()
-
-	// Get data from database
-	rows, err := app.db.QueryContext(ctx, "SELECT id, name, data FROM test_data ORDER BY id")
-	if err != nil {
-		http.Error(w, fmt.Sprintf("Database error: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer rows.Close()
-
-	var results []TestData
-	for rows.Next() {
-		var data TestData
-		if err := rows.Scan(&data.ID, &data.Name, &data.Data); err != nil {
-			http.Error(w, fmt.Sprintf("Scan error: %v", err), http.StatusInternalServerError)
-			return
-		}
-		results = append(results, data)
-	}
-
-	if err := rows.Err(); err != nil {
-		http.Error(w, fmt.Sprintf("Rows error: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(results)
-}
-
 func (app *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method == "POST" {
 		// Insert new data
@@ -222,7 +191,7 @@ func (app *App) dataHandler(w http.ResponseWriter, r *http.Request) {
 
 	// GET request - return data with caching
 	ctx := context.Background()
-	
+
 	// Try to get from cache first
 	cached, err := app.rdb.Get(ctx, "test_data_cache").Result()
 	if err == nil {

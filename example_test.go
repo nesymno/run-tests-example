@@ -87,7 +87,7 @@ func TestApp(t *testing.T) {
 func cleanupTestData(t *testing.T, ctx context.Context, postgresConfig PostgresConfig, redisConfig RedisConfig) {
 	t.Log("=== CLEANUP FUNCTION CALLED ===")
 	t.Log("Starting test data cleanup...")
-	
+
 	// Simple test to see if we can log
 	t.Log("Cleanup function is executing...")
 
@@ -102,7 +102,7 @@ func cleanupTestData(t *testing.T, ctx context.Context, postgresConfig PostgresC
 		return
 	}
 	defer db.Close()
-	
+
 	// Test connection with retry
 	var pingErr error
 	for i := 0; i < 5; i++ {
@@ -113,14 +113,14 @@ func cleanupTestData(t *testing.T, ctx context.Context, postgresConfig PostgresC
 		t.Logf("PostgreSQL ping attempt %d failed: %v", i+1, pingErr)
 		time.Sleep(time.Second)
 	}
-	
+
 	if pingErr != nil {
 		t.Logf("Error: Could not ping PostgreSQL after 5 attempts: %v", pingErr)
 		return
 	}
-	
+
 	t.Log("PostgreSQL connection successful")
-	
+
 	// Clear test data table
 	result, err := db.ExecContext(ctx, "DELETE FROM test_data")
 	if err != nil {
@@ -149,14 +149,14 @@ func cleanupTestData(t *testing.T, ctx context.Context, postgresConfig PostgresC
 		t.Logf("Redis ping attempt %d failed: %v", i+1, redisPingErr)
 		time.Sleep(time.Second)
 	}
-	
+
 	if redisPingErr != nil {
 		t.Logf("Error: Could not ping Redis after 5 attempts: %v", redisPingErr)
 		return
 	}
-	
+
 	t.Log("Redis connection successful")
-	
+
 	// Clear all test keys
 	keys := []string{"key1", "key2", "key3", "test_list", "test_hash", "test_data_cache", "test_key"}
 	clearedCount := 0
@@ -317,19 +317,6 @@ func testAppIntegration(t *testing.T, ctx context.Context, baseURL string) {
 		body, err := io.ReadAll(resp.Body)
 		require.NoError(t, err)
 		assert.Contains(t, string(body), "KubeRLy Test App")
-	})
-
-	t.Run("Test Data Endpoint", func(t *testing.T) {
-		resp, err := client.Get(baseURL + "/api/test")
-		require.NoError(t, err)
-		defer resp.Body.Close()
-
-		assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-		var data []TestData
-		err = json.NewDecoder(resp.Body).Decode(&data)
-		require.NoError(t, err)
-		assert.NotEmpty(t, data, "should return test data")
 	})
 
 	t.Run("Data CRUD Operations", func(t *testing.T) {
