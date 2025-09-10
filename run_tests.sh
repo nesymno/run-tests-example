@@ -29,14 +29,14 @@ sleep 20
 echo "Step 5: Running tests with proper environment variables..."
 # Set environment variables for tests to connect to the app service
 export APP_HOST=localhost
-export APP_PORT=8090
+export PORT=8080
 export POSTGRES_HOST=localhost
-export POSTGRES_PORT=54320
+export POSTGRES_PORT=5432
 export POSTGRES_USER=postgres
 export POSTGRES_PASSWORD=postgres
 export POSTGRES_DB=testdb
 export REDIS_HOST=localhost
-export REDIS_PORT=63790
+export REDIS_PORT=6379
 
 go test -v ./...
 
