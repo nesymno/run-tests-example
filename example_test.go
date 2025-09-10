@@ -16,6 +16,8 @@ import (
 	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/nesymno/run-tests-example/types"
 )
 
 type PostgresConfig struct {
@@ -53,7 +55,7 @@ func TestApp(t *testing.T) {
 	if appHost == "" {
 		appHost = "localhost"
 	}
-	appPort := os.Getenv("APP_PORT")
+	appPort := os.Getenv("PORT")
 	if appPort == "" {
 		appPort = "8080"
 	}
@@ -200,7 +202,7 @@ func testPGWithConfig(t *testing.T, ctx context.Context, config PostgresConfig) 
 	`)
 	require.NoError(t, err, "failed to create test table")
 
-	testData := []TestData{
+	testData := []types.TestData{
 		{Name: "test1", Data: "data1"},
 		{Name: "test2", Data: "data2"},
 		{Name: "test3", Data: "data3"},
@@ -217,9 +219,9 @@ func testPGWithConfig(t *testing.T, ctx context.Context, config PostgresConfig) 
 	require.NoError(t, err, "failed to query test data")
 	defer rows.Close()
 
-	var results []TestData
+	var results []types.TestData
 	for rows.Next() {
-		var data TestData
+		var data types.TestData
 		err := rows.Scan(&data.ID, &data.Name, &data.Data)
 		require.NoError(t, err)
 		results = append(results, data)
@@ -296,7 +298,7 @@ func testAppIntegration(t *testing.T, ctx context.Context, baseURL string) {
 
 		assert.Equal(t, http.StatusOK, resp.StatusCode)
 
-		var health HealthResponse
+		var health types.HealthResponse
 		err = json.NewDecoder(resp.Body).Decode(&health)
 		require.NoError(t, err)
 
@@ -321,7 +323,7 @@ func testAppIntegration(t *testing.T, ctx context.Context, baseURL string) {
 
 	t.Run("Data CRUD Operations", func(t *testing.T) {
 		// Test POST - Create new data
-		newData := TestData{Name: "integration_test", Data: "test_data"}
+		newData := types.TestData{Name: "integration_test", Data: "test_data"}
 		jsonData, err := json.Marshal(newData)
 		require.NoError(t, err)
 
