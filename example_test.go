@@ -55,7 +55,8 @@ func TestApp(t *testing.T) {
 	if appHost == "" {
 		appHost = "localhost"
 	}
-	appPort := os.Getenv("PORT")
+
+	appPort := os.Getenv("APP_PORT")
 	if appPort == "" {
 		appPort = "8080"
 	}
